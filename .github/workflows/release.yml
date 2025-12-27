@@ -1,10 +1,10 @@
-name: Build danser
+name: Build conflick
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Danser version'
+        description: 'Conflick version (e.g. 0.5.1 snapshot)'
         type: string
         required: true
       draft:
@@ -15,105 +15,123 @@ on:
 
 jobs:
   build_windows:
-    name: Building windows version
+    name: Build Windows (conflick)
     runs-on: windows-latest
     defaults:
       run:
         shell: bash
+
     steps:
-      - name: Checkout master branch
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install winlibs
+      - name: Install winlibs (gcc)
         uses: bwoodsend/setup-winlibs-action@v1
 
-      - name: Install golang
-        uses: actions/setup-go@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: '1.19.1'
           cache: true
 
-      - name: Build danser
+      - name: Build conflick (Windows)
+        id: build
         run: |
+          set -e
           version="${{ github.event.inputs.version }}"
 
-          ./dist-win.sh $version
+          chmod +x dist-win.sh
+          ./dist-win.sh "$version"
 
-          if [ ! -f "dist/artifacts/danser-${version// /-s}-win.zip" ]; then
-            echo "Danser failed to build"
+          ORIGINAL="dist/artifacts/danser-${version// /-s}-win.zip"
+          OUTPUT="dist/artifacts/conflick-windows.zip"
+
+          if [ ! -f "$ORIGINAL" ]; then
+            echo "❌ Windows build failed"
             exit 1
           fi
-        id: build
 
-      - name: Upload artifact
+          mv "$ORIGINAL" "$OUTPUT"
+
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
-        if: ${{ !failure() && steps.build.conclusion != 'failure' }}
         with:
-          name: danser
-          path: dist/artifacts/*
+          name: conflick-windows
+          path: dist/artifacts/conflick-windows.zip
+
 
   build_linux:
-    name: Building linux version
+    name: Build Linux (conflick)
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout master branch
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install needed packages
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install xorg-dev libgl1-mesa-dev libgtk-3-dev
+          sudo apt-get install -y xorg-dev libgl1-mesa-dev libgtk-3-dev
 
-      - name: Install golang
-        uses: actions/setup-go@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: '1.19.1'
           cache: true
 
-      - name: Build danser
+      - name: Build conflick (Linux)
+        id: build
         run: |
+          set -e
           version="${{ github.event.inputs.version }}"
-          
+
           chmod +x dist-linux.sh
-          ./dist-linux.sh $version
-          
-          if [ ! -f "dist/artifacts/danser-${version// /-s}-linux.zip" ]; then
-            echo "Danser failed to build"
+          ./dist-linux.sh "$version"
+
+          ORIGINAL="dist/artifacts/danser-${version// /-s}-linux.zip"
+          OUTPUT="dist/artifacts/conflick-linux.zip"
+
+          if [ ! -f "$ORIGINAL" ]; then
+            echo "❌ Linux build failed"
             exit 1
           fi
-        id: build
 
-      - name: Upload artifact
+          mv "$ORIGINAL" "$OUTPUT"
+
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
-        if: ${{ !failure() && steps.build.conclusion != 'failure' }}
         with:
-          name: danser
-          path: dist/artifacts/*
+          name: conflick-linux
+          path: dist/artifacts/conflick-linux.zip
+
 
   publish_release:
     name: Publish draft release
-    if: ${{ !cancelled() && needs.build_windows.result == 'success' && needs.build_linux.result == 'success' && github.event.inputs.draft }}
     needs: [build_windows, build_linux]
+    if: ${{ github.event.inputs.draft }}
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Download artifacts
+      - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: danser
+          name: conflick-windows
           path: artifacts
-      - name: Create release
-        id: create_release
-        run: |
-          set -xe
-          shopt -s nullglob
 
-          version="${{ github.event.inputs.version }}"
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: conflick-linux
+          path: artifacts
 
-          NAME="${version// / snapshot }"
-          TAGNAME="${version// /-s}"
-
-          hub release create --draft $(for a in artifacts/*.{zip,tar.xz}; do echo -a $a; done) -m "$NAME" -t "master" "$TAGNAME"
+      - name: Create GitHub draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: conflick ${{ github.event.inputs.version }}
+          tag_name: conflick-${{ github.event.inputs.version }}
+          files: |
+            artifacts/conflick-windows.zip
+            artifacts/conflick-linux.zip
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
